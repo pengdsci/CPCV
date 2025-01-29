@@ -1,0 +1,151 @@
+---
+title: "Quarto Test Document"
+format:
+  html:
+    toc: true
+    toc-location: left
+    code-fold: true
+    code-line-numbers: true
+    code-tools: 
+          source: true
+          toggle: true
+    code-summary: "Show the code"
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true  
+    documentclass: report
+    classoption: [twocolumn, landscape]
+    lof: true
+    lot: true
+    geometry:
+      - top=30mm
+      - left=20mm
+      - heightrounded
+    mainfont: Times New Roman
+jupyter: python3
+---
+
+```{=html}
+<style type="text/css">
+
+div#TOC li {
+    list-style:none;
+    background-image:none;
+    background-repeat:none;
+    background-position:0;
+}
+
+h1.title {
+  font-size: 24px;
+  font-weight: bold;
+  color: DarkRed;
+  text-align: center;
+}
+h4.author { /* Header 4 - and the author and data headers use this too  */
+    font-size: 20px;
+    font-weight: bold;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkRed;
+  text-align: center;
+}
+h4.date { /* Header 4 - and the author and data headers use this too  */
+  font-size: 18px;
+  font-weight: bold;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkBlue;
+  text-align: center;
+}
+h1 { /* Header 3 - and the author and data headers use this too  */
+    font-size: 22px;
+    font-weight: bold;
+    font-family: "Times New Roman", Times, serif;
+    color: darkred;
+    text-align: center;
+}
+h2 { /* Header 3 - and the author and data headers use this too  */
+    font-size: 20px;
+    font-weight: bold;
+    font-family: "Times New Roman", Times, serif;
+    color: navy;
+    text-align: left;
+}
+
+h3 { /* Header 3 - and the author and data headers use this too  */
+    font-size: 18px;
+    font-weight: bold;
+    font-family: "Times New Roman", Times, serif;
+    color: navy;
+    text-align: left;
+}
+
+h4 { /* Header 4 - and the author and data headers use this too  */
+    font-size: 16px;
+    font-weight: bold;
+    font-family: "Times New Roman", Times, serif;
+    color: darkred;
+    text-align: left;
+}
+</style>
+```
+
+
+# Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+# Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{python}
+1 + 1
+```
+
+Multiple line code
+
+
+You can add options to executable code like this
+
+```{python}
+#| echo: false
+2 * 2
+```
+
+It looks like you've shared a handwritten solution to a probability problem involving joint and marginal distributions, as well as checking for independence between two random variables $X\) and $Y\). Let’s go over the main parts of the solution provided.
+
+1. **Problem Statement**: 
+   - You’re given a joint probability density function $f(x, y) = 6xy(2 - x - y)$ for $0 \leq x \leq 1$ and $0 \leq y \leq 1$.
+
+2. **Part (i) - Finding $f_X(x)$**:
+   - The goal here is to find the marginal distribution of $X$, $f_X(x)$, by integrating out $y$:
+     $$
+     f_X(x) = \int_0^1 6xy(2 - x - y) \, dy
+     $$
+   - It looks like you've correctly set up the integration and simplified it to reach $f_X(x) = 4x - 6x^2$.
+
+3. **Part (ii) - Finding $f_Y(y)$**:
+   - Similarly, here you're finding the marginal distribution of $Y$, $f_Y(y)$, by integrating out $x$:
+     $$
+     f_Y(y) = \int_0^1 6xy(2 - x - y) \, dx
+     $$
+   - After simplifying, you reached $f_Y(y) = 4y - 3y^2$, which appears to be correct based on the work shown.
+
+4. **Part (iii) - Checking Independence**:
+   - To check if $X$and $Y$are independent, you need to verify if $f(x, y) = f_X(x) \cdot f_Y(y)$for all $x$and $y$.
+   - Based on your calculations, $f(x, y) \neq f_X(x) \cdot f_Y(y)$, so you correctly concluded that $X$and $Y$are not independent.
+
+5. **Part (iv) - Conditional Probability $f_{X|Y}(x|y)$**:
+   - Here, you’re asked to find the conditional probability distribution of $X$given $Y = y$.
+   - You used the formula:
+     $$
+     f_{X|Y}(x|y) = \frac{f(x, y)}{f_Y(y)}
+     $$
+   - After substituting and simplifying, you reached the final expression:
+     $$
+     f_{X|Y}(x|y) = \frac{6x(2 - x - y)}{4y - 3y^2}
+     $$
+
+Your calculations seem consistent with the steps for solving this type of problem. If you have any specific questions on these steps or need clarification on a particular part, feel free to ask!
+
+
