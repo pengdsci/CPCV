@@ -1,0 +1,381 @@
+#######################################################################
+##     Historical Credit Card Transaction Data
+##      1. 25575 good cards
+##      2. 7762 compromized cards
+##      3. Each card has 41 histrical transactions
+##      4. Timestamp and dollar amount of each transactions
+##      5. The most recent transaction of the bad cards is fraudulent
+######################################################################
+##
+##--------------------  Read in raw data sets -----------------------------          
+gdc = read.csv("C:\\cpeng\\Research\\JSM2021\\data-prep\\IDXDataset_gdc.csv")
+wpc = read.csv("C:\\cpeng\\Research\\JSM2021\\data-prep\\IDXDataset_wpc.csv")
+##
+##--------------------------------------------------------------------------
+##                       Transaction Matrix
+##  Each matrix have 41 columns to store 41 transactions for each card
+##  The transaction matrix of good card has 25575 rows. The transaction
+##  matrix has 7762 rows.
+##-------------------------------------------------------------------------
+nc.gd0 = dim(gdc)[1]/41
+nc.bd = dim(wpc)[1]/41
+nr.gd = 41
+gdc.amt = gdc$dollar_amt    
+gdc.mtrx0 = matrix(gdc.amt, ncol = 41, byrow=TRUE)
+wpc.amt = wpc$dollar_amt
+wpc.mtrx = matrix(wpc.amt, ncol = 41, byrow=TRUE)
+##
+##-------------------------------------------------------------------------
+##            detect potential unidentified "good cards""
+##        More than four consective transactions with identical amounts
+##-------------------------------------------------------------------------
+##
+rep150=NULL
+for (i in 1:nc.gd0){
+ rep150[i] =  sum(round(gdc.mtrx0[i,])==round(150))
+}
+del = rep150 < 3
+##
+gdc.mtrx = gdc.mtrx0[del,] 
+nc.gd = dim(gdc.mtrx)[1]
+#c(dim(gdc.mtrx0), nc.gd)
+##-------------------------------------------------------------------------
+##             Define the fraud index using a heuristic PCI
+##-------------------------------------------------------------------------
+## function for defining PCI
+idx.calc = function(alpha, beta, vec){
+   a = alpha
+   b = beta
+   old = vec[-(1:a)]
+   new = vec[(1:a)]
+   #idx = (b*max(old) + (2-b)*mean(old) - 2*mean(new))/(max(new)-mean(new))
+   idx = (b*sd(old) + 2*(mean(old)-mean(new)))/(3*sqrt(var(new)+(mean(old)-mean(new))^2))
+   idx
+}
+##
+gd.idx4.15 = NULL
+bd.idx4.15 = NULL
+for(i in 1:nc.gd) gd.idx4.15[i] = idx.calc(alpha=5, beta = 30, vec=gdc.mtrx[i,])
+for(i in 1:nc.bd) bd.idx4.15[i] = idx.calc(alpha=5, beta = 30, vec=wpc.mtrx[i,])
+gd50.415 = gd.idx4.15[gd.idx4.15 < 150]    # keep only indexes < 500
+bd50.415 = bd.idx4.15[bd.idx4.15 < 150]    # keep only indexes < 500
+###########################
+##     Libraries
+###########################
+library(ggplot2)
+library(alabama)
+
+
+##--------------------------------------------------------------------------
+##          Visualizing Separability of the fraud index
+##   and the shape of the distributions of the two "fraud" indexes 
+##--------------------------------------------------------------------------
+gd50.415.frm = data.frame(index = gd50.415)
+bd50.415.frm = data.frame(index = bd50.415)
+gd50.415.frm$status = " good"
+bd50.415.frm$status = "fraud"
+idx = rbind(gd50.415.frm, bd50.415.frm)
+ggplot(idx, aes(index, fill = status)) + geom_density(alpha = 0.2)+
+      ggtitle("Smooth Density Curves of Fraud Index") +
+      xlab("Fraud Index") + ylab("Density") +
+      theme(
+         plot.title = element_text(color="darkred", size=14, face="bold.italic", hjust = 0.5, vjust = 0.01),
+         axis.title.x = element_text(color="blue", size=10, face="bold"),
+         axis.title.y = element_text(color="#993333", size=10, face="bold")
+       )
+##
+##----------------------------------------------------------------------------
+##        Determine the initial values of regression coefficients
+##  Create a group data and use the prospecive generalized linear model with
+##  Cloglog link. The resulting regression coefficients as the initial values
+##  to estimate the regression coefficients of the semi-parametric models
+##---------------------------------------------------------------------------- 
+## 
+idxes.gc = as.numeric(names(table(round(gd50.415 ))))
+gc.frq = as.vector(table(round(gd50.415 )))
+idxes.bc = as.numeric(names(table(round(bd50.415 ))))
+bc.frq = as.vector(table(round(bd50.415 )))
+gdc.freq=data.frame(good = gc.frq, idx = idxes.gc)
+wpc.freq=data.frame(fraud = bc.frq, idx = idxes.bc)
+merge.dat = merge(gdc.freq, wpc.freq, by.x = "idx", by.y = "idx", all = TRUE)
+merge.dat[is.na(merge.dat)] = 0
+merge.dat$total = merge.dat$good + merge.dat$fraud
+## merge.dat is the final group data
+dat.glmC = glm(cbind(fraud, total) ~ idx, data = merge.dat, family = binomial(link = "cloglog"))
+## regression coefficients
+a0 = coef(dat.glmC)[1]
+b0 = coef(dat.glmC)[2]
+##
+s0 = (length(bd50.415)/length(gd50.415))   # initial value of theta.
+##
+##--------------------------------------------------------------------------------------
+##            Preparing thr data set for the proposed semiparametric model
+##-------------------------------------------------------------------------------------
+##
+x = gd50.415[sample(1:length(gd50.415), 1000, replace = F)]
+z = bd50.415[sample(1:length(bd50.415), 200, replace = F)]
+t = c(x,z)
+### sample sizes and samplin gratio
+n0 = length(x)
+n1 = length(z)
+nn = n0 + n1
+##
+##------------------------------------------
+##  Semiparamteric log-likelihood function
+##------------------------------------------
+##############################################################
+####      Kernel of log-likelihood function
+###############################################################
+loglik.fun = function(para){
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  uz = exp(exp(aa+bb*z)) 
+  wz = uz - 1
+  ut = exp(exp(aa+bb*t)) 
+  wt = ut - 1
+  ## score functions
+  lglik = sum(log(wz))-sum(log(nn+lbd*(s0*wt-1)))
+  lglik
+}
+
+##############################################################
+####    Newton Method - for MLE of regression coefficients
+###############################################################
+## 1. score functions
+score.fun = function(para){
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  uz = exp(exp(aa+bb*z)) 
+  rz = uz*exp(aa+bb*z)
+  wz = uz - 1
+  ##
+  ut = exp(exp(aa+bb*t)) 
+  rt = ut*exp(aa+bb*t)
+  wt = ut - 1
+  ## score functions
+  fa = sum(rz/wz) - sum((lbd*s0*rt)/(nn+lbd*(s0*wt-1)))
+  fb = sum(z*rz/wz) - sum((t*lbd*s0*rt)/(nn+lbd*(s0*wt-1)))
+  flbd = - sum((s0*wt-1)/(nn+lbd*(s0*wt-1)))
+  ff = c(fa, fb, flbd)
+  ff
+}
+##
+###########################################
+##     3. initial value of lambda
+###########################################
+##
+lambda.ini = function(para){
+  aa = para[1]
+  bb = para[2]
+  ##
+  ut = exp(exp(aa+bb*t)) 
+  wt = ut - 1
+  ##
+  lambda = function(y) sum(1/(nn+y*(s0*wt-1)))-1
+  lbd = uniroot(lambda, c(-1, 1), tol = 0.0001)$root
+  lbd
+ }
+lbd0 = lambda.ini(c(a0, b0))
+##
+result=optim(c(a0,b0,lbd0), loglik.fun, score.fun, method="BFGS", hessian=TRUE, 
+               control=list(maxit=1000, fnscale=-1))
+#varcov = -solve(result$hessian)  # variance-covariance matrix of the MLE
+result
+
+varcov 
+MLE = result$par
+alpha = MLE[1]
+beta = MLE[2]
+
+################################################################
+################################################################
+###                Optim with nonlinear constraints
+#################################################################
+##############################################################
+####   1.    Kernel of log-likelihood function
+###############################################################
+loglik.fun0 = function(para){
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  uz = exp(exp(aa+bb*z)) 
+  wz = uz - 1
+  ut = exp(exp(aa+bb*t)) 
+  wt = ut - 1
+  ## score functions
+  lglik =-(sum(log(wz))-sum(log(nn+lbd*(s0*wt-1))))
+  lglik
+}
+
+########################################### 
+####        2. Score Euqations
+########################################### 
+##
+score.fun0 = function(para){
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  uz = exp(exp(aa+bb*z)) 
+  rz = uz*exp(aa+bb*z)
+  wz = uz - 1
+  ##
+  ut = exp(exp(aa+bb*t)) 
+  rt = ut*exp(aa+bb*t)
+  wt = ut - 1
+  ## score functions
+  fa = sum(rz/wz) - sum((lbd*s0*rt)/(nn+lbd*(s0*wt-1)))
+  fb = sum(z*rz/wz) - sum((t*lbd*s0*rt)/(nn+lbd*(s0*wt-1)))
+  flbd = - sum((s0*wt-1)/(nn+lbd*(s0*wt-1)))
+  ff = -c(fa, fb, flbd)
+  ff
+}
+############################################
+##     3.    equality constraint
+#############################################
+heq = function(para){
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  ut = exp(exp(aa+bb*t)) 
+  rt = ut*exp(aa+bb*t)
+  wt = ut - 1
+  ## constraint
+  h = sum(1/(nn+lbd*(s0*wt-1)))-1
+  h
+}
+###########################################
+##     4.  Equality Jacobian
+###########################################
+heq.jac = function(para){
+  jac <- matrix(NA, 1, length(para))
+  # parameters
+  aa = para[1]
+  bb = para[2]
+  lbd =para[3]
+  ## data vectors
+  ut = exp(exp(aa+bb*t)) 
+  rt = ut*exp(aa+bb*t)
+  wt = ut - 1
+  ##
+  c1 = -sum((lbd*s0*rt)/(nn+lbd*(s0*wt-1))^2)
+  c2 = -sum((lbd*s0*t*rt)/(nn+lbd*(s0*wt-1))^2)
+  c3 = -sum((s0*wt-1)/(nn+lbd*(s0*wt-1))^2)
+  ##
+  jac[1, ] <- c(c1, c2, c3)
+  jac
+}
+###########################################
+##     3. initial value of lambda
+###########################################
+##
+lambda.ini = function(para){
+  aa = para[1]
+  bb = para[2]
+  ##
+  ut = exp(exp(aa+bb*t)) 
+  wt = ut - 1
+  ##
+  lambda = function(y) sum(1/(nn+y*(s0*wt-1)))-1
+  lbd = uniroot(lambda, c(-1, 1), tol = 0.0001)$root
+  lbd
+ }
+
+####
+p0 <- c(a0, b0, lbd0)
+constrOptim.nl(par=p0, fn=loglik.fun0, gr=score.fun0, heq=heq, heq.jac=heq.jac)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##---------------------------------------------------------------------------------
+##      Fitted "Fraud" Probability Using Fraud Index With the Proposed Model
+##--------------------------------------------------------------------------------
+gd.fraud.prob = 1 - exp(-exp(-2.0917291771+0.0456415116*gd50.415))
+bd.fraud.prob = 1 - exp(-exp(-2.0917291771+0.0456415116*bd50.415))
+##
+gd.fraud.prob0 = gd.fraud.prob[gd.fraud.prob<0.01]
+bd.fraud.prob0 = bd.fraud.prob[bd.fraud.prob<0.01]
+###
+cutt = 0.006
+c(sum(gd.fraud.prob>cutt), sum(bd.fraud.prob>cutt))
+
+##sum(bd.fraud.prob0>cutt)/(sum(gd.fraud.prob0>cutt) + sum(bd.fraud.prob0>cutt))
+
+
+##---------------------------------------------------------------------------
+##           Visualization: Distribution of fraud probabilities
+##---------------------------------------------------------------------------
+##
+library(ggplot2)
+gd.prob.frm = data.frame(fraud.prob = gd.fraud.prob)
+bd.prob.frm = data.frame(fraud.prob = bd.fraud.prob)
+gd.prob.frm$status = " good"
+bd.prob.frm$status = "fraud"
+fraud.prob.all = rbind(gd.prob.frm, bd.prob.frm)
+write.csv(fraud.prob.all,"C:\\cpeng\\Research\\JSM2021\\data-prep\\fraudprob.csv", row.names = FALSE)
+## for by probabilities
+#srt.fraud.prob = fraud.prob.all[order(fraud.prob),]
+ggplot(fraud.prob.all, aes(fraud.prob, fill = status)) + 
+      geom_density(alpha = 0.2) +
+      ggtitle("Estimated Smooth Density Curves of Fraud Probabilities") +
+      xlab("Fraud Probability") + ylab("Density") +
+      theme(
+         plot.title = element_text(color="darkred", size=14, face="bold.italic", hjust = 0.5, vjust = 0.01),
+         axis.title.x = element_text(color="blue", size=10, face="bold"),
+         axis.title.y = element_text(color="#993333", size=10, face="bold")
+       )
+
+
+
+
+
+
+
+
+
+
+
+
+
+

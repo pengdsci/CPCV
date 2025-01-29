@@ -1,0 +1,181 @@
+#######################################################################
+##     Historical Credit Card Transaction Data
+##      1. 25575 good cards
+##      2. 7762 compromised cards
+##      3. Each card has 41 historical transactions
+##      4. Timestamp and dollar amount of each transaction
+##      5. The most recent transaction of the bad cards is fraudulent
+######################################################################
+##
+##--------------------  Read in raw data sets -----------------------------          
+gdc = read.csv("C:\\cpeng\\data-prep\\data-prep\\IDXDataset_gdc.csv")
+wpc = read.csv("C:\\cpeng\\data-prep\\data-prep\\IDXDataset_wpc.csv")
+##
+##--------------------------------------------------------------------------
+##                       Transaction Matrix
+##  Each matrix have 41 columns to store 41 transactions for each card
+##  The transaction matrix of good cards has 25575 rows. The transaction
+##  matrix has 7762 rows.
+##-------------------------------------------------------------------------
+nc.gd = dim(gdc)[1]/41
+nc.bd = dim(wpc)[1]/41
+nr.gd = 41
+gdc.amt = gdc$dollar_amt    
+gdc.mtrx = matrix(gdc.amt, ncol = 41, byrow=TRUE)
+wpc.amt = wpc$dollar_amt
+wpc.mtrx = matrix(wpc.amt, ncol = 41, byrow=TRUE)
+##
+##-------------------------------------------------------------------------
+##             Define the fraud index using a heuristic PCI
+##-------------------------------------------------------------------------
+## function for defining PCI
+idx = function(alpha, beta, vec){
+   a = alpha
+   b = beta
+   old = vec[-(1:a)]
+   new = vec[(1:a)]
+   idx = (b*max(old) + (2-b)*mean(old) - 2*mean(new))/(max(new)-mean(new))
+   idx
+}
+##
+gd.idx4.15 = NULL
+bd.idx4.15 = NULL
+for(i in 1:nc.gd) gd.idx4.15[i] = idx(alpha=5, beta = 20, vec=gdc.mtrx[i,])
+for(i in 1:nc.bd) bd.idx4.15[i] = idx(alpha=5, beta = 20, vec=wpc.mtrx[i,])
+gd50.415 = gd.idx4.15[gd.idx4.15 < 500]    # keep only indexes < 500
+bd50.415 = bd.idx4.15[bd.idx4.15 < 500]    # keep only indexes < 500
+##
+##--------------------------------------------------------------------------
+##          Visualizing the Separability of the fraud index
+##   and the shape of the distributions of the two types "fraud" index 
+##--------------------------------------------------------------------------
+gd50.415.frm = data.frame(index = gd50.415)
+bd50.415.frm = data.frame(index = bd50.415)
+gd50.415.frm$status = " good"
+bd50.415.frm$status = "fraud"
+idx = rbind(gd50.415.frm, bd50.415.frm)
+ggplot(idx, aes(index, fill = status)) + geom_density(alpha = 0.2)
+##
+##----------------------------------------------------------------------------
+##        Determine the initial values of regression coefficients
+##  Create a group data and use the prospective generalized linear model with
+##  Cloglog link. The resulting regression coefficients as the initial values
+##  to estimate the regression coefficients of the semi-parametric models
+##---------------------------------------------------------------------------- 
+## 
+idxes.gc = as.numeric(names(table(round(gd50.415 ))))
+gc.frq = as.vector(table(round(gd50.415 )))
+idxes.bc = as.numeric(names(table(round(bd50.415 ))))
+bc.frq = as.vector(table(round(bd50.415 )))
+gdc.freq=data.frame(good = gc.frq, idx = idxes.gc)
+wpc.freq=data.frame(fraud = bc.frq, idx = idxes.bc)
+merge.dat = merge(gdc.freq, wpc.freq, by.x = "idx", by.y = "idx", all = TRUE)
+merge.dat[is.na(merge.dat)] = 0
+merge.dat$total = merge.dat$good + merge.dat$fraud
+## merge.dat is the final group data
+dat.glmC = glm(cbind(fraud, total) ~ idx, data = merge.dat, family = binomial(link = "cloglog"))
+## regression coefficients
+a = coef(dat.glmC)[1]
+b = coef(dat.glmC)[2]
+##
+s = (length(bd50.415)/length(gd50.415))   # initial value of theta.
+##
+##--------------------------------------------------------------------------------------
+##            Preparing the data set for the proposed semiparametric model
+##-------------------------------------------------------------------------------------
+##
+x = gd50.415 # [sample(1:length(gd50.415), 150, replace = F)]
+z = bd50.415 #[sample(1:length(bd50.415), 100, replace = F)]
+t = c(x,z)
+### sample sizes and samplin gratio
+n0 = length(x)
+n1 = length(z)
+rho = n0/n1
+##
+##------------------------------------------
+##  Semiparamteric log-likelihood function
+##------------------------------------------
+##
+lglik.fun = function(param){
+  ## the vector od model parameters
+  a = param[1]
+  b = param[2]
+  s = param[3]
+  ##
+  uz = exp(exp(a+b*z))
+  rz = uz*exp(a+b*z)
+  ut = exp(exp(a+b*t))
+  rt = ut*exp(a+b*t)
+  ##
+  lglik = sum(log(s*(uz-1))) - sum(log(1+rho*s*(ut-1))) -(n0+n1)*log(n0)
+  lglik
+ }
+##
+##----------------------------------------------
+##       semiparametric gradient function
+##----------------------------------------------
+##
+grad.fun = function(param){
+  ## the vector od model parameters
+  a = param[1]
+  b = param[2]
+  s = param[3]
+  ##
+  uz = exp(exp(a+b*z))
+  rz = uz*exp(a+b*z)
+  ut = exp(exp(a+b*t))
+  rt = ut*exp(a+b*t)
+  ##
+  f1 = sum((rz)/(uz-1)) -sum((rho*s*rt)/(1+rho*s*(ut-1)))
+  f2 = sum((z*rz)/(uz-1)) -sum((rho*s*t*rt)/(1+rho*s*(ut-1)))
+  f3 = n1/s - sum((rho*(ut-1))/(1+rho*s*(ut-1)))
+  c(f1,f2,f3)
+}
+##
+##---------------------------------------------------------------------------------
+##     Using R Built-in function, optim(). to find the MLE of model parameter
+##---------------------------------------------------------------------------------
+result=optim(c(a,b,s), lglik.fun, grad.fun, method="BFGS", hessian=TRUE, 
+               control=list(maxit=1000, fnscale=-1))
+varcov = -solve(result$hessian)  # variance-covariance matrix of the MLE
+result
+varcov 
+MLE = result$par
+alpha = MLE[1]
+beta = MLE[2]
+##---------------------------------------------------------------------------------
+##      Fitted "Fraud" Probability Using Fraud Index With the Proposed Model
+##--------------------------------------------------------------------------------
+gd.fraud.prob = 1 - exp(-exp(alpha + beta*gd50.415))
+bd.fraud.prob = 1 - exp(-exp(alpha + beta*bd50.415))
+##
+gd.fraud.prob0 = gd.fraud.prob[gd.fraud.prob<0.003]
+bd.fraud.prob0 = bd.fraud.prob[bd.fraud.prob<0.003]
+##---------------------------------------------------------------------------
+##           Visualization: Distribution of fraud probabilities
+##---------------------------------------------------------------------------
+##
+library(ggplot2)
+gd.prob.frm = data.frame(fraud.prob = gd.fraud.prob0)
+bd.prob.frm = data.frame(fraud.prob = bd.fraud.prob0)
+gd.prob.frm$status = " good"
+bd.prob.frm$status = "fraud"
+fraud.prob.all = rbind(gd.prob.frm, bd.prob.frm)
+## for by probabilities
+#srt.fraud.prob = fraud.prob.all[order(fraud.prob),]
+ggplot(fraud.prob.all, aes(fraud.prob, fill = status)) + geom_density(alpha = 0.2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
